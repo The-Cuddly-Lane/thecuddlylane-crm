@@ -65,7 +65,7 @@ function genderPhrase(gs){const s=(gs||'').toLowerCase();const sex=s.includes('f
 function fmtDogDesc(d){if(!d)return'';const a=ageYears(d.birthday);const gp=genderPhrase(d.gender||d.genderStatus);const parts=['🐾'];if(a!==null)parts.push(a+' y/o');if(gp)parts.push(gp);if(d.breed)parts.push(d.breed);return parts.join(' ');}
 
 // ==================== CONSTANTS ====================
-const TABS={DOGS:'Dogs',BK:'Bookings',DAILY:'Daily-Log',HEALTH:'Health-Log',FIGHT:'Fight-Log',TRANSPORT:'Transport-Log',TRIAL:'Trial-Log',COSTS:'Costs',TARGETS:'Targets',TRAIN:'Staff-Training',CONSENT:'Consent',TPLS:'Templates',ACTS:'Activities',ACTLOG:'Activity-Log',RATES:'Rates'};
+const TABS={DOGS:'Dogs',BK:'Bookings',DAILY:'Daily-Log',HEALTH:'Health-Log',FIGHT:'Fight-Log',TRANSPORT:'Transport-Log',TRIAL:'Trial-Log',COSTS:'Costs',TARGETS:'Targets',TRAIN:'Staff-Training',CONSENT:'Consent',TPLS:'Templates',ACTS:'Activities',ACTLOG:'Activity-Log',RATES:'Rates',MG:'Meet-Greets'};
 const DR={board_std:38,board_hol:44,board_add:31,board_addh:35.65,day_std:28,day_hol:33,day_add:23,day_addh:26.45,evening_pct:25,t15s:12,t15r:20,t30s:17,t30r:30,t60s:45,t60r:80,walk30:15,walk60:24,walk30a:12,walk60a:19,walk30_11:20,walk60_11:29,dropin30:15,dropin60:24,dropin30a:12,dropin60a:19};
 const DEFAULT_RANGES=[{start:'2026-04-03',end:'2026-04-06',label:'Easter 2026'},{start:'2026-05-01',end:'2026-05-04',label:'May Bank Hol'},{start:'2026-05-22',end:'2026-05-25',label:'Late May BH'},{start:'2026-07-24',end:'2026-08-30',label:'Summer 2026'},{start:'2026-12-24',end:'2027-01-03',label:'Christmas 2026'}];
 const TP_QUOTE='Hi {{ownerName}},\n\nHere is the rate for our services with THE CUDDLY LANE \u2601\ufe0f\u2728\n\n{{rateBlock}}\n\nHere is your quotation:\n\n{{service}}{{discount}}\n\n*Total: {{total}}*\n\nTo secure your booking, a 50% prepayment will be required (non-refundable, but transferable to other dates). Let us know if you\u2019d like to go ahead!\n\nThank you!\nKatie & Osbert \ud83d\udc3e';
@@ -153,6 +153,7 @@ function loadConfig(){
   const m={cfg_sid:'tcl_sid',cfg_email:'tcl_email',cfg_keyid:'tcl_keyid'};
   Object.entries(m).forEach(([id,k])=>{const v=localStorage.getItem(k);const el=document.getElementById(id);if(v&&el)el.value=v;});
   const p=localStorage.getItem('tcl_pin');if(p&&document.getElementById('cfg_pin'))document.getElementById('cfg_pin').value=p;
+  const ci=document.getElementById('cfg_calid');if(ci)ci.value=localStorage.getItem('tcl_calid')||'';
   updateKeyPreview();
 }
 function updateKeyPreview(){const k=localStorage.getItem('tcl_key');const prev=document.getElementById('keyPreview');if(!prev)return;if(k){prev.style.display='block';prev.textContent='Key saved: '+maskKey(k);}else prev.style.display='none';}
@@ -749,6 +750,8 @@ async function refreshBoard(){
     const dl=await readSheet(TABS.DAILY,'A1:R').catch(()=>[]);const dlh=mkHdr(dl[0]||[]);dailyHdrRow=dl[0]||[];dailyLogRows=dl.slice(1);dailyLogSet=new Set(dailyLogRows.map(r=>(dlh['CustomerID']!==undefined?r[dlh['CustomerID']]||'':'')+'_'+(dlh['Date']!==undefined?r[dlh['Date']]||'':'')));
     const trn=await readSheet(TABS.TRAIN,'A2:K').catch(()=>[]);trainRecords=trn.map((r,i)=>({ri:i+2,date:r[0]||'',staff:r[1]||'',cat:r[2]||'',obj:r[3]||'',prov:r[4]||'',learnt:r[5]||'',cpd:r[6]||'',link:r[7]||'',materials:r[8]||'',next:r[9]||'',remind:r[10]||''}));// load training so To-Do repeat reminders work (Training feature)
     const [hlR,ftR,trR,acR]=await Promise.all([readSheet(TABS.HEALTH,'A1:Z1').catch(()=>[]),readSheet(TABS.FIGHT,'A1:Z1').catch(()=>[]),readSheet(TABS.TRANSPORT,'A1:Z1').catch(()=>[]),readSheet(TABS.ACTS,'A1:Z1').catch(()=>[])]);healthHdrRow=hlR[0]||[];fightHdrRow=ftR[0]||[];transportHdrRow=trR[0]||[];actsHdrRow=acR[0]||[];
+    // Meet & greets live in their own tab (created on first save) — a missing tab just means none yet.
+    await loadMeetGreets();
     // Sync targets from sheet into localStorage
     syncTargetsFromSheet().catch(()=>{});
     // Sync activities library from sheet so sheet edits show in app
@@ -1837,6 +1840,7 @@ async function syncSettingsFromSheet(){
     const rr=rows.find(r=>r[0]==='tcl_rates');if(rr&&rr[1])localStorage.setItem('tcl_rates',rr[1]);
     const hr=rows.find(r=>r[0]==='tcl_hol_ranges');if(hr&&hr[1])localStorage.setItem('tcl_hol_ranges',hr[1]);
     const tv=rows.find(r=>r[0]==='tcl_tc_version');if(tv)localStorage.setItem('tcl_tc_version',tv[1]||'');
+    const cr=rows.find(r=>r[0]==='tcl_calid');if(cr)localStorage.setItem('tcl_calid',cr[1]||'');
   }catch(e){}
 }
 async function saveHolRangesToSheet(ranges){
@@ -2535,7 +2539,7 @@ function renderCalendar(){
   const host=document.getElementById('sc-calendar');if(!host)return;
   _computeNewRis();
   document.querySelectorAll('.cal-view-btn').forEach(b=>b.classList.toggle('active',b.dataset.v===_calView));
-  document.getElementById('calBody').innerHTML=_calView==='month'?_calMonthHtml():_calView==='slots'?_calSlotsHtml():_calWeekHtml();
+  document.getElementById('calBody').innerHTML=(_calView==='month'?_calMonthHtml():_calView==='slots'?_calSlotsHtml():_calWeekHtml())+_mgListHtml();
 }
 // Tapping a day in Month view jumps straight to that day's Hour view.
 function openDayHour(ds){_calAnchor=ds;_calSelDay='';_calView='slots';renderCalendar();}
@@ -2553,7 +2557,7 @@ function _calMonthHtml(){
     cells+='<div class="cal-cell'+(inMo?'':' out')+(isToday?' today':'')+'" data-d="'+ds+'" onclick="openDayHour(\''+ds+'\')" style="background:'+bg+';cursor:pointer;">'+
       '<div class="cal-cell-hd"><span style="font-weight:700;'+(inMo?'':'color:var(--gr3);')+'">'+d.getDate()+'</span>'+
       (occ>0?'<span style="font-weight:800;color:'+_capCol(occ)+';">'+occ+'/'+CAL_CAP+'</span>':'')+'</div>'+
-      '<div class="cal-names">'+names+'</div>'+
+      '<div class="cal-names">'+names+_mgChips(ds)+'</div>'+
       '<div class="cal-foot">'+foot+'</div></div>';
   }
   const hdr=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>'<div style="font-size:8px;font-weight:700;color:var(--gr2);text-align:center;padding:2px 0;">'+d+'</div>').join('');
@@ -2580,6 +2584,7 @@ function _calGridHtml(start,nDays){
   const svcRows=SVC_ROWS.map(([lbl,al])=>{const perDay=days.map(()=>[]);
     bookings.forEach(b=>{const committed=CAL_ACTIVE.includes(b.status),quoted=b.status==='Quoted';if(!committed&&!quoted)return;const s=(b.svc||'').toLowerCase();if(!al.some(a=>s.includes(a)))return;const di=days.indexOf(normDate(b.sd));if(di>=0)perDay[di].push({b,quoted});});
     return{lbl,perDay,has:perDay.some(a=>a.length)};}).filter(r=>r.has);
+  {const perDay=days.map(ds=>mgOn(ds).map(m=>({b:{customerId:m.cid,dog:m.dog,st:m.time},quoted:false})));if(perDay.some(x=>x.length))svcRows.push({lbl:'🤝 Meet & greet',perDay,has:true});}
   let g='<div class="cw-grid" style="grid-template-columns:34px repeat('+nDays+',minmax(0,1fr));">';
   g+='<div class="cw-cell cw-corner" style="grid-row:1;grid-column:1;"></div>';
   days.forEach((ds,i)=>{const d=new Date(ds+'T12:00:00');const occ=occupantsOn(ds).length;const q=quotedOn(ds).length;
@@ -3155,6 +3160,181 @@ document.getElementById('boardDate').textContent='· '+new Date().toLocaleDateSt
 (function(){const fm=(document.getElementById('verFooter')?.textContent||'').match(/tcl-v[\w.]+/);const av=document.getElementById('appVer');if(fm&&av)av.textContent=fm[0].replace('tcl-','');})();
 document.getElementById('backBtn').style.display='none';
 document.getElementById('reg_eid').value='';document.getElementById('reg_ridx').value='';
+
+// ==================== MEET & GREET (own sheet tab + optional Google Calendar sync) ====================
+// Each meet & greet is one row in the "Meet-Greets" tab. If a Google Calendar ID is set in Settings, saving also
+// creates / updates / removes the matching Google Calendar event. Calendar is optional: with no Calendar ID (or if
+// Google refuses), the meet & greet is still saved to the sheet and shown in the app — it never blocks the save.
+const MG_H=['ID','CustomerID','DogName','Owner','Phone','Date','Time','DurationMins','Location','Notes','Status','CalEventId','UpdatedAt'];
+const MG_DEF_LOC='Hengrove Park Leisure Centre car park, BS14 0DE';
+const MG_TZ='Europe/London';
+let meetGreets=[],mgHdrRow=[],_mgTabMissing=false,_mgSaving=false;
+function _mgEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+function mapMG(r,i,h){const g=n=>h[n]!==undefined?(r[h[n]]||''):'';return{id:g('ID'),cid:g('CustomerID'),dog:g('DogName'),owner:g('Owner'),phone:g('Phone'),date:normDate(g('Date')),time:_fmtT(g('Time')),dur:parseInt(g('DurationMins'))||30,loc:g('Location'),notes:g('Notes'),status:g('Status')||'Scheduled',eventId:g('CalEventId'),ri:i+2};}
+function mgFieldMap(m){return{ID:m.id,CustomerID:m.cid,DogName:m.dog,Owner:m.owner,Phone:sheetPhone(m.phone),Date:m.date,Time:m.time,DurationMins:m.dur,Location:m.loc,Notes:m.notes,Status:m.status,CalEventId:m.eventId||'',UpdatedAt:new Date().toISOString()};}
+async function loadMeetGreets(){
+  try{const rows=await readSheet(TABS.MG,'A1:M');mgHdrRow=rows[0]||[];const h=mkHdr(mgHdrRow);meetGreets=rows.slice(1).map((r,i)=>mapMG(r,i,h)).filter(m=>m.id);_mgTabMissing=!mgHdrRow.length;}
+  catch(e){meetGreets=[];mgHdrRow=[];_mgTabMissing=true;}
+}
+async function _mgEnsureTab(){
+  if(!_mgTabMissing&&mgHdrRow.length)return;
+  const t=await getToken();
+  // addSheet fails harmlessly if the tab already exists (e.g. created by hand, but empty) — the header write below still runs.
+  try{await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+getSID()+':batchUpdate',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({requests:[{addSheet:{properties:{title:TABS.MG}}}]})});}catch(e){}
+  await updateRow(TABS.MG,1,MG_H);mgHdrRow=MG_H.slice();_mgTabMissing=false;
+}
+function mgActive(){return meetGreets.filter(m=>m.status!=='Cancelled'&&m.date);}
+function mgOn(ds){return mgActive().filter(m=>m.date===ds).sort((a,b)=>(a.time||'').localeCompare(b.time||''));}
+function _mgChips(ds){return mgOn(ds).map(m=>'<span class="cal-dog" style="color:var(--pu,#6d28d9);font-weight:700;text-decoration:none;" onclick="event.stopPropagation();openMG(\''+_mgEsc(m.id)+'\')" title="Meet &amp; greet '+_mgEsc(m.time)+' — '+_mgEsc(m.dog)+'">🤝 '+_mgEsc(m.time)+' '+_mgEsc(m.dog)+'</span>').join('');}
+function _mgListHtml(){
+  const today=todayStr();const up=mgActive().filter(m=>m.date>=today).sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
+  const calOn=!!getCalId();
+  let h='<div style="margin-top:14px;border-top:1px solid var(--gr4);padding-top:10px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span style="font-size:12px;font-weight:800;">🤝 Upcoming meet &amp; greets</span><button class="sbtn2" style="font-size:10px;padding:5px 10px;" onclick="openMG()">＋ Meet &amp; greet</button></div>';
+  if(!up.length)h+='<div style="font-size:10px;color:var(--gr3);">None scheduled.</div>';
+  up.forEach(m=>{const cal=!calOn?'':(m.eventId?'<span title="In Google Calendar" style="color:var(--gn);">📅✓</span>':'<span title="Not in Google Calendar yet — open and Save to retry" style="color:var(--rd);font-weight:700;">📅✗</span>');
+    h+='<div onclick="openMG(\''+_mgEsc(m.id)+'\')" style="display:flex;gap:8px;align-items:center;padding:8px 10px;margin-bottom:5px;background:var(--wh);border:1px solid var(--gr4);border-left:3px solid var(--pu,#6d28d9);border-radius:8px;cursor:pointer;"><div style="flex:1;min-width:0;"><div style="font-size:11px;font-weight:700;">'+_mgEsc(fmtDate(m.date))+' · '+_mgEsc(m.time)+' — '+_mgEsc(m.dog)+'</div><div style="font-size:9px;color:var(--gr2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+_mgEsc([m.owner,m.phone,m.loc].filter(Boolean).join(' · '))+'</div></div><div style="font-size:11px;">'+cal+'</div></div>';});
+  return h+'</div>';
+}
+// ---- form ----
+function mgDogChange(){const v=document.getElementById('mg_dog').value;const isNew=v==='__new';document.getElementById('mg_newWrap').style.display=isNew?'block':'none';
+  if(!isNew){const d=_dogByCid(v);if(d){document.getElementById('mg_owner').value=d.owner||'';document.getElementById('mg_phone').value=d.phone||'';}}}
+function openMG(id){
+  const m=id?meetGreets.find(x=>x.id===id):null;
+  const sel=document.getElementById('mg_dog');
+  sel.innerHTML='<option value="__new">➕ New dog (enquiry)</option>'+allDogs.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(d=>'<option value="'+_mgEsc(d.cid)+'">'+_mgEsc(dogOptLabel(d))+'</option>').join('');
+  const s=(i,v)=>{document.getElementById(i).value=v;};
+  s('mg_id',m?m.id:'');s('mg_newName','');
+  if(m&&m.cid&&_dogByCid(m.cid))sel.value=m.cid;else sel.value='__new';
+  sel.disabled=!!m;// the dog is fixed once a meet & greet exists — cancel and re-create to move it to another dog
+  if(m&&sel.value==='__new')s('mg_newName',m.dog);
+  s('mg_owner',m?m.owner:'');s('mg_phone',m?m.phone:'');
+  s('mg_date',m?m.date:(_calView==='slots'&&_calAnchor>=todayStr()?_calAnchor:''));s('mg_time',m?m.time:'');s('mg_dur',String(m?m.dur:30));
+  s('mg_loc',m?m.loc:MG_DEF_LOC);s('mg_notes',m?m.notes:'');
+  document.getElementById('mg_newWrap').style.display=sel.value==='__new'?'block':'none';
+  document.getElementById('mg_title').textContent=m?'Edit meet & greet':'New meet & greet';
+  document.getElementById('mg_cancelBtn').style.display=m?'':'none';
+  document.getElementById('mg_status').textContent='';
+  document.getElementById('mg_calNote').textContent=getCalId()?'Saving also updates Google Calendar.':'Google Calendar is not connected (Settings → Google Calendar) — this will be saved in the app only.';
+  document.getElementById('mgModal').style.display='block';document.body.style.overflow='hidden';
+}
+function closeMG(){document.getElementById('mgModal').style.display='none';document.body.style.overflow='';}
+async function _mgWriteRow(m){
+  await _mgEnsureTab();
+  // Re-read to find this ID's real row (another device may have added/removed rows since our last sync).
+  const fresh=await readSheet(TABS.MG,'A1:A');const fi=fresh.slice(1).findIndex(r=>(r[0]||'')===m.id);
+  const vals=rowFromMap(mgHdrRow,mgFieldMap(m),MG_H);
+  if(fi>=0){m.ri=fi+2;await updateRow(TABS.MG,m.ri,vals);}else{await appendRow(TABS.MG,vals);m.ri=fresh.length+1;}
+}
+async function saveMG(){
+  if(_mgSaving)return;const st=document.getElementById('mg_status');
+  const id=gv('mg_id');const existing=id?meetGreets.find(x=>x.id===id):null;
+  const dogSel=gv('mg_dog');const date=gv('mg_date'),time=gv('mg_time');
+  const owner=gv('mg_owner').trim(),phone=gv('mg_phone').trim();
+  let cid=existing?existing.cid:'',dogName=existing?existing.dog:'';
+  if(!existing){if(dogSel==='__new'){dogName=gv('mg_newName').trim();if(!dogName){st.textContent='Enter the dog\'s name.';return;}if(!owner||!phone){st.textContent='Owner name and phone are needed for a new dog.';return;}}
+    else{const d=_dogByCid(dogSel);if(!d){st.textContent='Choose a dog.';return;}cid=d.cid;dogName=d.name;}}
+  if(!date||!time){st.textContent='Pick a date and a time.';return;}
+  _mgSaving=true;st.style.color='var(--gr2)';st.textContent='Saving…';
+  try{
+    // 1) New dog → minimal profile (name, ID, owner, phone) so the enquiry exists in the database.
+    if(!existing&&dogSel==='__new'){cid=genId(dogName);
+      const drow=rowFromMap(dogsHdrRow,{CustomerID:cid,DogName:dogName,Name:dogName,Owner1:owner,Phone1:sheetPhone(phone),Status:'Enquiry',MeetGreetDate:date},TABS.DOGS.h);
+      await appendRow(TABS.DOGS,drow);const prow=drow.slice();const dh=mkHdr(dogsHdrRow);if(dh['Phone1']!==undefined)prow[dh['Phone1']]=phone;
+      allDogs.push(mapDog(prow,allDogs.length,dh));refreshDogDropdowns();}
+    // 2) The meet & greet row.
+    const m=existing||{id:'MG-'+Date.now().toString(36).toUpperCase(),eventId:'',status:'Scheduled'};
+    Object.assign(m,{cid,dog:dogName,owner,phone,date,time:_fmtT(time),dur:parseInt(gv('mg_dur'))||30,loc:gv('mg_loc').trim(),notes:gv('mg_notes').trim(),status:'Scheduled'});
+    await _mgWriteRow(m);if(!existing)meetGreets.push(m);
+    // 3) Google Calendar (optional). A failure here never undoes the save above.
+    let calMsg='';
+    if(getCalId()){try{m.eventId=await mgCalUpsert(m);await _mgWriteRow(m);calMsg=' + Google Calendar';}catch(e){calMsg='';toast('Saved in the app, but Google Calendar was NOT updated: '+(e&&e.message||e),'err');}}
+    // 4) Existing dog with no first meet & greet date on the profile → fill it in.
+    if(existing||dogSel!=='__new'){const d=_dogByCid(cid);if(d&&!d.meetgreet){d.meetgreet=date;saveDogRow(d).catch(()=>{});}}
+    closeMG();renderBoard();if(document.getElementById('sc-calendar').classList.contains('active'))renderCalendar();
+    toast('Meet & greet saved'+calMsg+' — '+dogName+', '+fmtDate(date)+' '+_fmtT(time),'ok');
+  }catch(e){st.style.color='var(--rd)';st.textContent='Not saved: '+(e&&e.message||e);}
+  finally{_mgSaving=false;}
+}
+function cancelMG(){const id=gv('mg_id');const m=meetGreets.find(x=>x.id===id);if(!m)return;
+  document.getElementById('mgCfmMsg').textContent=m.dog+' — '+fmtDate(m.date)+' '+m.time+'. It will also be removed from Google Calendar if connected.';
+  _mgPendingCancel=id;document.getElementById('mgCancelConfirm').style.display='flex';}
+let _mgPendingCancel='';
+function closeMGCancel(){document.getElementById('mgCancelConfirm').style.display='none';_mgPendingCancel='';}
+async function doCancelMG(){
+  const m=meetGreets.find(x=>x.id===_mgPendingCancel);closeMGCancel();if(!m||_mgSaving)return;_mgSaving=true;
+  try{const prev=m.status;m.status='Cancelled';
+    try{await _mgWriteRow(m);}catch(e){m.status=prev;throw e;}
+    if(m.eventId&&getCalId()){try{await mgCalDelete(m);m.eventId='';await _mgWriteRow(m);}catch(e){toast('Cancelled in the app, but the Google Calendar event could NOT be removed — delete it by hand. '+(e&&e.message||e),'err');}}
+    closeMG();if(document.getElementById('sc-calendar').classList.contains('active'))renderCalendar();toast('Meet & greet cancelled','ok');
+  }catch(e){toast('Not cancelled: '+(e&&e.message||e),'err');}
+  finally{_mgSaving=false;}
+}
+// ---- Google Calendar ----
+// Uses the same service account as Sheets, with its own token (calendar.events scope) so the Sheets login is untouched.
+// One-off setup by the Google account owner: (1) enable "Google Calendar API" in the service account's Cloud project,
+// (2) share the calendar with the service account's client_email with "Make changes to events", (3) paste the Calendar ID in Settings.
+let _calTok=null,_calTokExp=0;
+function getCalId(){return (localStorage.getItem('tcl_calid')||'').trim();}
+async function getCalToken(){
+  if(_calTok&&Date.now()<_calTokExp)return _calTok;
+  const email=localStorage.getItem('tcl_email'),rawKey=localStorage.getItem('tcl_key');
+  if(!email||!rawKey)throw new Error('No Google credentials saved in Settings.');
+  const now=Math.floor(Date.now()/1000);
+  const payload={iss:email,scope:'https://www.googleapis.com/auth/calendar.events',aud:'https://oauth2.googleapis.com/token',exp:now+3600,iat:now};
+  const b64=rawKey.replace(/\\n/g,'\n').replace(/-----[A-Z ]+-----/g,'').replace(/\s/g,'');
+  const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+  const ck=await crypto.subtle.importKey('pkcs8',bytes.buffer,{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'},false,['sign']);
+  const b64u=s=>btoa(s).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+  const u=b64u(JSON.stringify({alg:'RS256',typ:'JWT'}))+'.'+b64u(JSON.stringify(payload));
+  const sig=await crypto.subtle.sign('RSASSA-PKCS1-v1_5',ck,new TextEncoder().encode(u));
+  const jwt=u+'.'+b64u(String.fromCharCode(...new Uint8Array(sig)));
+  const r=await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion='+jwt});
+  const d=await r.json();if(!d.access_token)throw new Error(d.error_description||'Calendar sign-in failed');
+  _calTok=d.access_token;_calTokExp=Date.now()+3500000;return _calTok;
+}
+// Wall-clock end time (no timezone maths): Google applies MG_TZ to both start and end, so BST/GMT is handled there.
+function _mgEndLocal(date,time,dur){const p=date.split('-').map(Number),t=time.split(':').map(Number);const d=new Date(Date.UTC(p[0],p[1]-1,p[2],t[0],t[1]+(dur||30)));return d.toISOString().slice(0,19);}
+function mgCalBody(m){
+  const desc=['Dog: '+m.dog+(m.cid?' ('+m.cid+')':''),m.owner?'Owner: '+m.owner:'',m.phone?'Phone: '+m.phone:'',m.notes?'Notes: '+m.notes:'','','Created from The Cuddly Lane staff app ('+m.id+')'].filter((x,i,a)=>x||a[i-1]).join('\n');
+  return{summary:'🤝 Meet & Greet — '+m.dog+(m.owner?' ('+m.owner+')':''),location:m.loc||'',description:desc,
+    start:{dateTime:m.date+'T'+_fmtT(m.time)+':00',timeZone:MG_TZ},end:{dateTime:_mgEndLocal(m.date,_fmtT(m.time),m.dur),timeZone:MG_TZ}};
+}
+async function _calReq(method,path,body){
+  const t=await getCalToken();
+  const r=await fetch('https://www.googleapis.com/calendar/v3/calendars/'+encodeURIComponent(getCalId())+path,{method,headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+  if(r.status===204)return{status:204,data:{}};
+  let d={};try{d=await r.json();}catch(e){}
+  return{status:r.status,data:d};
+}
+function _calErr(res){const msg=(res.data&&res.data.error&&res.data.error.message)||('HTTP '+res.status);
+  if(res.status===404)return new Error('Calendar not found — check the Calendar ID and that the calendar is shared with the service account.');
+  if(res.status===403)return new Error(msg+' — check the Calendar API is enabled and the calendar is shared with "Make changes to events".');
+  return new Error(msg);}
+async function mgCalUpsert(m){
+  const body=mgCalBody(m);
+  if(m.eventId){const res=await _calReq('PATCH','/events/'+encodeURIComponent(m.eventId),{...body,status:'confirmed'});
+    if(res.status>=200&&res.status<300&&res.data.id)return res.data.id;
+    if(res.status!==404&&res.status!==410)throw _calErr(res);}// event deleted by hand in Google Calendar → fall through and recreate
+  const res=await _calReq('POST','/events',body);
+  if(res.status>=200&&res.status<300&&res.data.id)return res.data.id;
+  throw _calErr(res);
+}
+async function mgCalDelete(m){const res=await _calReq('DELETE','/events/'+encodeURIComponent(m.eventId));if(res.status===204||res.status===200||res.status===404||res.status===410)return;throw _calErr(res);}
+async function saveCalConfig(){
+  const st=document.getElementById('calCfgStatus');const v=(document.getElementById('cfg_calid').value||'').trim();
+  localStorage.setItem('tcl_calid',v);st.style.color='var(--gr2)';st.textContent='Saving…';
+  try{const rows=await readSheet(TABS.RATES,'A2:C').catch(()=>[]);const idx=rows.findIndex(r=>r[0]==='tcl_calid');const vals=['tcl_calid',v,new Date().toISOString()];
+    if(idx>=0)await updateRow(TABS.RATES,idx+2,vals);else await appendRow(TABS.RATES,vals);
+    st.style.color='var(--gn)';st.textContent=v?'Saved — shared with all devices via the sheet.':'Google Calendar sync turned off.';
+  }catch(e){st.style.color='var(--or)';st.textContent='Saved on this device only ('+e.message+').';}
+}
+async function testCal(){
+  const st=document.getElementById('calCfgStatus');if(!getCalId()){st.style.color='var(--rd)';st.textContent='Save a Calendar ID first.';return;}
+  st.style.color='var(--gr2)';st.textContent='Testing…';_calTok=null;
+  try{const res=await _calReq('GET','/events?maxResults=1');if(res.status<200||res.status>=300)throw _calErr(res);
+    st.style.color='var(--gn)';st.textContent='✓ Connected to "'+(res.data.summary||getCalId())+'". Read works — save a test meet & greet to confirm write access.';
+  }catch(e){st.style.color='var(--rd)';st.textContent='✗ '+(e&&e.message||e);}
+}
 document.getElementById('st_date').value=todayStr();
 const bmDog=document.getElementById('bm_dog');if(bmDog)bmDog.addEventListener('change',updateDogIdHint);
 registerSW();
